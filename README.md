@@ -1,4 +1,4 @@
-# tiny-skill
+# tiny-skill-agent
 
 `SKILL.md` を読む最小 Python サンプルです。GitHub Copilot / Agent Skills の考え方に寄せて、以下の流れで動きます。
 
