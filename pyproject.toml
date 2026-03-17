@@ -1,0 +1,22 @@
+[project]
+name = "tiny-skill-agent"
+version = "0.1.0"
+description = "Tiny Agent Skills runner for OpenAI-compatible API (completions)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "openai>=1.68.0",
+  "PyYAML>=6.0.2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+
+[tool.uv]
+package = false
