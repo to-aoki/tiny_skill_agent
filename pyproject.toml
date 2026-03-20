@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "tiny-skill-agent"
 version = "0.1.0"
@@ -9,6 +13,9 @@ dependencies = [
   "PyYAML>=6.0.2",
 ]
 
+[project.scripts]
+tiny-skill-agent = "tiny_skill_agent.cli:main"
+
 [dependency-groups]
 dev = [
   "pytest>=8.3.5",
@@ -19,4 +26,4 @@ testpaths = ["tests"]
 addopts = "-p no:cacheprovider"
 
 [tool.uv]
-package = false
+package = true

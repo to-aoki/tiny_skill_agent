@@ -11,13 +11,14 @@ def test_parse_and_validate_valid_skill(valid_skill_dir):
     assert report.errors == []
 
 
-def test_parse_and_validate_uses_yaml_fallback_for_unquoted_colon(colon_skill_dir):
+def test_parse_and_validate_rejects_unquoted_colon_yaml(colon_skill_dir):
     report = tiny_skill_agent.Skill.parse_and_validate(colon_skill_dir)
-    codes = {item.code for item in report.warnings}
+    codes = {item.code for item in report.errors}
 
-    assert report.loadable is True
-    assert report.valid is True
-    assert "yaml-fallback-used" in codes
+    assert report.loadable is False
+    assert report.valid is False
+    assert report.skill is None
+    assert "yaml-unparseable" in codes
 
 
 def test_parse_and_validate_missing_description_blocks_loading(missing_description_skill_dir):
@@ -55,7 +56,7 @@ def test_registry_skips_blocking_invalid_skills_and_keeps_first_duplicate(skills
     registry = tiny_skill_agent.SkillRegistry([skills_dir])
 
     assert registry.get("valid-skill") is not None
-    assert registry.get("colon-skill") is not None
+    assert registry.get("colon-skill") is None
     assert registry.get("bad_skill") is not None
     assert registry.get("missing-description") is None
     assert registry.get("shared-skill") is not None

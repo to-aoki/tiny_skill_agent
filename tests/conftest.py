@@ -6,8 +6,10 @@ from uuid import uuid4
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+SRC = ROOT / "src"
+for candidate in (str(SRC), str(ROOT)):
+    if candidate not in sys.path:
+        sys.path.insert(0, candidate)
 
 import tiny_skill_agent
 

@@ -3,8 +3,9 @@ name: valid-skill
 description: Use this skill for validation and orchestration tests.
 compatibility: Python 3.10+
 allowed-tools:
-  - read-files
-  - run-local-scripts
+  - read
+  - write
+  - shell
 metadata:
   owner: tests
 ---

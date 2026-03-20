@@ -1,14 +1,6 @@
 # tiny-skill-agent
 
-`SKILL.md` を読む最小 Python サンプルです。GitHub Copilot / Agent Skills の考え方に寄せて、以下の流れで動きます。
-
-1. 起動時に `name` / `description` を読み、Copilot 風の skill adherence block を作る
-2. タスクに合う skill があるときだけ、その `SKILL.md` 本文を読み込む
-3. skill 配下の bundled files は inventory として渡し、必要になったファイルだけをターンごとに読む
-4. `--allow-scripts` が有効なら、`scripts/` 配下の Python script をターンごとに複数回実行できる
-5. 複数 skill が当てはまる場合はまとめて有効化し、`respond` が返るか上限ターンに達するまでセッションを継続する
-
-> GitHub Copilot の内部実装そのものではありません
+`SKILL.md` を読み、必要な skill だけを有効化してタスクを進める最小の Agent Skills ランナーです。
 
 ## セットアップ
 
@@ -18,67 +10,117 @@
 uv sync
 ```
 
-以降の実行は `uv run` を使えば、作成された仮想環境上でそのまま動きます。
-
 ### pip / venv
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
 ## 実行
 
-```bash
-uv run python tiny_skill_agent.py "リポジトリの内容を説明して" --workspace . --skills ./skills/ --allow-scripts
-```
-
-`--skills` には skill 一覧ディレクトリだけでなく、`./skills/repo-map` や `./skills/repo-map/SKILL.md` のような単一 skill パスも渡せます。
-runner は `--skills` で明示的に渡されたパスだけを確認します。
-
-## SKILL.md の検証
-
-`SKILL.md` の frontmatter をパースし、形式が正しいかを検証できます。
+### カタログ表示
 
 ```bash
-uv run python tiny_skill_agent.py --skills ./skills --validate-skills
+uv run tiny-skill-agent --skills ./skills --show-catalog
 ```
 
-検証結果は JSON で出力され、spec 違反があると終了コードは `1` になります。
-
-## 推論ソフトウェア定義例
-
-### Ollama
+### 通常実行
 
 ```bash
-export OPENAI_BASE_URL=http://localhost:11434/v1
+uv run tiny-skill-agent "リポジトリの内容を説明して" --workspace . --skills ./skills --allow-scripts
 ```
 
-### LM Studio
+### OpenAI API ログ出力
 
 ```bash
-export OPENAI_BASE_URL=http://localhost:1234/v1
+uv run tiny-skill-agent "リポジトリの内容を説明して" --workspace . --skills ./skills --allow-scripts --openai-log-file ./logs/openai-chat-completions.jsonl
 ```
 
-### vLLM
+### SKILL.md の検証
 
 ```bash
-export OPENAI_BASE_URL=http://localhost:8000/v1
+uv run tiny-skill-agent --skills ./skills --validate-skills
 ```
 
-## セッション継続上限
+`--skills` には次を渡せます。
 
-セッションは `respond` が返るまで続きます。上限は `--max-skill-turns` で設定できます。
+- skill 一覧ディレクトリ
+  - `./skills`
+- 単一 skill ディレクトリ
+  - `./skills/repo-map`
+- 単一 `SKILL.md`
+  - `./skills/repo-map/SKILL.md`
 
-```bash
-uv run python tiny_skill_agent.py "このリポジトリの概要を教えて" --workspace . --skills ./skills --allow-scripts --max-skill-turns 8
+## 主な挙動
+
+- 起動時に `name` と `description` を読み、候補 skill を作ります
+- タスクに合う skill だけを有効化します
+- skill 本文や skill 配下ファイルは必要なときだけ読みます
+- workspace のルートや内容は最初からモデルに渡しません
+- workspace 操作は `--workspace` で渡したルート配下を対象に行えます
+- `--allow-scripts` を付けたときだけ `scripts/` 配下の `.py` を実行できます
+- セッションは `respond` が返るか `--max-skill-turns` に達するまで続きます
+
+## workspace
+
+workspace を読む・書くアクションは、CLI の `--workspace` または `SkillAgent(..., workspace=...)` で渡したルート配下を対象に行います。
+
+## `allowed-tools`
+
+`allowed-tools` は読み取りますが、現実装では権限制御には使っていません。実際の制御に使うのは次だけです。
+
+- `--allow-scripts`
+
+## Python から使う
+
+```python
+from pathlib import Path
+import json
+import os
+
+from openai import OpenAI
+
+from tiny_skill_agent import SkillAgent, SkillRegistry
+
+
+def main() -> None:
+    registry = SkillRegistry([Path("./skills")])
+    client = OpenAI(
+        base_url=os.getenv("OPENAI_BASE_URL", "http://127.0.0.1:8000/v1"),
+        api_key=os.getenv("OPENAI_API_KEY", "dummy"),
+    )
+
+    agent = SkillAgent(
+        client=client,
+        model=os.getenv("OPENAI_MODEL", "your-model-name"),
+        registry=registry,
+        workspace=Path(".").resolve(),
+        allow_scripts=True,
+        max_skill_turns=8,
+    )
+
+    result = agent.run("このリポジトリの概要を教えて")
+    print(result["selected_skills"])
+    print(result["final"])
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()
 ```
 
-## オーケストレーションの挙動
+## 環境変数
 
-- `SKILL.md` 本文だけを先にモデルへ渡します
-- skill 配下のファイル内容は必要になった時点で `read_resource` として 1 ファイルずつ読み込みます
-- script 実行は `run_script` として 1 ターンに 1 本ずつ行います
-- 実行対象は `scripts/` 配下の `.py` のみです
-- 読み込んだ resource 内容と script 出力は以降のターンに履歴として保持されます
+- `OPENAI_BASE_URL`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL_NAME`
+- `OPENAI_MODEL`
+- `OPENAI_API_LOG_FILE`
+
+## 補足
+
+- OpenAI 互換 API は `chat.completions` を使います
+- `agent.run(...)` の戻り値は dict です
+- 主なキーは `final`, `selected_skills`, `resource_reads`, `workspace_reads`, `workspace_writes`, `script_runs`, `session_steps` です
