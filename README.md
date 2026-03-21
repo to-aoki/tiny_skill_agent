@@ -29,13 +29,13 @@ uv run tiny-skill-agent --skills ./skills --show-catalog
 ### 通常実行
 
 ```bash
-uv run tiny-skill-agent "リポジトリの内容を説明して" --workspace . --skills ./skills --allow-scripts
+uv run tiny-skill-agent "pptxをマークダウンに変換して" --workspace . --skills ./skills --allow-scripts
 ```
 
 ### OpenAI API ログ出力
 
 ```bash
-uv run tiny-skill-agent "リポジトリの内容を説明して" --workspace . --skills ./skills --allow-scripts --openai-log-file ./logs/openai-chat-completions.jsonl
+uv run tiny-skill-agent "pptxをマークダウンに変換して" --workspace . --skills ./skills --allow-scripts --openai-log-file ./logs/openai-chat-completions.jsonl
 ```
 
 ### SKILL.md の検証
@@ -49,9 +49,9 @@ uv run tiny-skill-agent --skills ./skills --validate-skills
 - skill 一覧ディレクトリ
   - `./skills`
 - 単一 skill ディレクトリ
-  - `./skills/repo-map`
+  - `./skills/office-to-markdown`
 - 単一 `SKILL.md`
-  - `./skills/repo-map/SKILL.md`
+  - `./skills/office-to-markdown/SKILL.md`
 
 ## 主な挙動
 

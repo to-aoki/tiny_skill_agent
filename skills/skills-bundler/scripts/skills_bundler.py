@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -10,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import urlretrieve
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZipFile
 
 try:
     import yaml
@@ -44,6 +45,10 @@ BROAD_TERMS = {
     "generic",
     "workflow",
     "workflows",
+}
+INSTALL_TARGET_DIRS = {
+    "github": Path(".github/skills"),
+    "claude": Path(".claude/skills"),
 }
 
 
@@ -185,24 +190,21 @@ def iter_skill_files(skill_dir: Path) -> list[Path]:
     return files
 
 
-def build_archive(
-    workspace: Path,
-    source_dir: Path,
+def copy_skills_to_directory(
+    destination_dir: Path,
     selected_skills: list[SkillSummary],
-    output_dir: Path | None,
-    group_name: str | None,
-) -> Path:
-    destination_dir = (output_dir or workspace).resolve()
+) -> tuple[list[Path], list[Path]]:
     destination_dir.mkdir(parents=True, exist_ok=True)
-    archive_group_name = slugify(group_name or derive_group_name(None, [skill.name for skill in selected_skills]))
-    archive_path = destination_dir / f"{archive_group_name}.zip"
-    with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
-        for skill in selected_skills:
-            for file_path in iter_skill_files(skill.directory):
-                rel = file_path.relative_to(skill.directory)
-                archive_name = Path(archive_group_name) / skill.directory.name / rel
-                archive.write(file_path, archive_name)
-    return archive_path
+    copied_paths: list[Path] = []
+    skipped_paths: list[Path] = []
+    for skill in selected_skills:
+        target_dir = destination_dir / skill.directory.name
+        if target_dir.exists():
+            skipped_paths.append(target_dir)
+            continue
+        shutil.copytree(skill.directory, target_dir, ignore=shutil.ignore_patterns(*SKIP_PARTS))
+        copied_paths.append(target_dir)
+    return copied_paths, skipped_paths
 
 
 def validate_source_dir(source_dir: Path) -> Path:
@@ -234,13 +236,20 @@ def build_archive_download_url(source_url: str) -> str:
     return f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{branch}"
 
 
-def download_source_archive(workspace: Path, source_url: str) -> Path:
+def build_cache_key(source_url: str) -> str:
+    return hashlib.sha256(source_url.encode("utf-8")).hexdigest()[:12]
+
+
+def create_runtime_cache_dir(workspace: Path, source_url: str) -> Path:
+    return workspace / ".tiny-skill-agent-skills-bundler-cache" / build_cache_key(source_url)
+
+
+def download_source_archive(cache_dir: Path, source_url: str) -> Path:
     local_path = Path(source_url)
     if local_path.exists() and local_path.is_file():
         return local_path.resolve()
-    cache_root = workspace / ".skills-bundler-cache"
-    cache_root.mkdir(parents=True, exist_ok=True)
-    archive_path = cache_root / "source.zip"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = cache_dir / "source.zip"
     download_url = build_archive_download_url(source_url)
     try:
         urlretrieve(download_url, archive_path)
@@ -251,10 +260,8 @@ def download_source_archive(workspace: Path, source_url: str) -> Path:
     return archive_path
 
 
-def extract_source_archive(workspace: Path, archive_path: Path) -> Path:
-    extract_root = workspace / ".skills-bundler-cache" / "extracted"
-    if extract_root.exists():
-        shutil.rmtree(extract_root)
+def extract_source_archive(cache_dir: Path, archive_path: Path) -> Path:
+    extract_root = cache_dir / "extracted"
     extract_root.mkdir(parents=True, exist_ok=True)
     try:
         with ZipFile(archive_path) as archive:
@@ -267,9 +274,9 @@ def extract_source_archive(workspace: Path, archive_path: Path) -> Path:
     return extract_root
 
 
-def resolve_downloaded_source_dir(workspace: Path, source_url: str) -> Path:
-    archive_path = download_source_archive(workspace, source_url)
-    extracted_root = extract_source_archive(workspace, archive_path)
+def resolve_downloaded_source_dir(cache_dir: Path, source_url: str) -> Path:
+    archive_path = download_source_archive(cache_dir, source_url)
+    extracted_root = extract_source_archive(cache_dir, archive_path)
     skills_dir = extracted_root / "skills"
     if skills_dir.is_dir():
         return skills_dir.resolve()
@@ -284,30 +291,45 @@ def resolve_source_dir(
     workspace: Path,
     source_dir: str | None,
     source_url: str | None,
+    cache_dir: Path | None = None,
 ) -> Path:
     if source_dir:
-        return validate_source_dir(Path(source_dir))
+        candidate = Path(source_dir)
+        if not candidate.is_absolute():
+            candidate = workspace / candidate
+        return validate_source_dir(candidate)
     if source_url:
-        return resolve_downloaded_source_dir(workspace, source_url)
+        if cache_dir is None:
+            raise SystemExit("Internal error: cache_dir is required for --source-url.")
+        return resolve_downloaded_source_dir(cache_dir, source_url)
     raise SystemExit("Either --source-dir or --source-url is required.")
 
 
-def resolve_output_dir(workspace: Path, output_dir: str | None) -> Path | None:
-    if output_dir is None:
-        return None
-    candidate = Path(output_dir)
+def resolve_workspace_dir(workspace: Path, directory: str) -> Path:
+    candidate = Path(directory)
     resolved = (
         candidate.resolve()
         if candidate.is_absolute()
         else (workspace / candidate).resolve()
     )
-    duplicate_workspace_dir = workspace / workspace.name
-    if resolved == duplicate_workspace_dir:
+    if not resolved.is_relative_to(workspace):
         raise SystemExit(
-            "Refusing output_dir that duplicates the workspace name beneath "
-            f"the workspace: {output_dir}"
+            "Refusing target directory outside the workspace: "
+            f"{directory}"
         )
     return resolved
+
+
+def resolve_install_dir(
+    workspace: Path,
+    target: str | None,
+    target_dir: str | None,
+) -> Path:
+    if target:
+        return resolve_workspace_dir(workspace, str(INSTALL_TARGET_DIRS[target]))
+    if target_dir:
+        return resolve_workspace_dir(workspace, target_dir)
+    raise SystemExit("Either --target or --target-dir is required.")
 
 
 def find_selected_skills(all_skills: list[SkillSummary], names: list[str]) -> list[SkillSummary]:
@@ -326,11 +348,11 @@ def find_selected_skills(all_skills: list[SkillSummary], names: list[str]) -> li
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Catalog, recommend, and archive Agent Skills.")
+    parser = argparse.ArgumentParser(description="Catalog, recommend, and copy Agent Skills.")
     parser.add_argument("--workspace", required=True)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    for command_name in ("catalog", "recommend", "archive"):
+    for command_name in ("catalog", "recommend", "copy"):
         command = subparsers.add_parser(command_name)
         source_group = command.add_mutually_exclusive_group(required=True)
         source_group.add_argument("--source-dir")
@@ -340,12 +362,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     recommend.add_argument("--query", required=True)
     recommend.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
 
-    archive = subparsers.choices["archive"]
-    archive.add_argument("--skills", nargs="+", required=True)
-    archive.add_argument("--output-dir")
-    archive.add_argument("--group-name")
-    archive.add_argument("--query")
-    archive.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    copy = subparsers.choices["copy"]
+    copy.add_argument("--skills", nargs="+", required=True)
+    copy_target = copy.add_mutually_exclusive_group(required=True)
+    copy_target.add_argument("--target", choices=sorted(INSTALL_TARGET_DIRS))
+    copy_target.add_argument("--target-dir")
+    copy.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     return parser.parse_args(argv)
 
 
@@ -390,13 +412,11 @@ def command_recommend(
     )
 
 
-def command_archive(
+def command_copy(
     workspace: Path,
     source_dir: Path,
     requested_names: list[str],
-    output_dir: Path | None,
-    group_name: str | None,
-    query: str | None,
+    destination_dir: Path,
     limit: int,
 ) -> None:
     if limit < 1:
@@ -405,16 +425,20 @@ def command_archive(
         raise SystemExit(f"Requested {len(requested_names)} skills but the limit is {limit}.")
     skills = load_skill_summaries(source_dir)
     selected = find_selected_skills(skills, requested_names)
-    archive_name = group_name or derive_group_name(query, [skill.name for skill in selected])
-    archive_path = build_archive(workspace, source_dir, selected, output_dir, archive_name)
-    base_dir = (output_dir or workspace).resolve()
+    copied_paths, skipped_paths = copy_skills_to_directory(destination_dir, selected)
     print(
         json.dumps(
             {
-                "archive": to_posix(archive_path.relative_to(base_dir) if archive_path.is_relative_to(base_dir) else archive_path),
-                "output_dir": to_posix(base_dir.relative_to(workspace) if base_dir.is_relative_to(workspace) else base_dir),
-                "group_name": archive_path.stem,
+                "target_dir": to_posix(destination_dir.relative_to(workspace)),
                 "skills": [skill.name for skill in selected],
+                "copied": [
+                    to_posix(path.relative_to(workspace))
+                    for path in copied_paths
+                ],
+                "skipped": [
+                    to_posix(path.relative_to(workspace))
+                    for path in skipped_paths
+                ],
             },
             ensure_ascii=False,
             indent=2,
@@ -425,10 +449,15 @@ def command_archive(
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv or sys.argv[1:])
     workspace = Path(args.workspace).resolve()
+    cache_dir: Path | None = None
+    source_url = getattr(args, "source_url", None)
+    if source_url:
+        cache_dir = create_runtime_cache_dir(workspace, source_url)
     source_dir = resolve_source_dir(
         workspace,
         getattr(args, "source_dir", None),
-        getattr(args, "source_url", None),
+        source_url,
+        cache_dir,
     )
 
     if args.command == "catalog":
@@ -437,9 +466,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "recommend":
         command_recommend(workspace, source_dir, args.query, args.limit)
         return
-    if args.command == "archive":
-        output_dir = resolve_output_dir(workspace, args.output_dir)
-        command_archive(workspace, source_dir, args.skills, output_dir, args.group_name, args.query, args.limit)
+    if args.command == "copy":
+        destination_dir = resolve_install_dir(workspace, args.target, args.target_dir)
+        command_copy(workspace, source_dir, args.skills, destination_dir, args.limit)
         return
     raise SystemExit(f"Unsupported command: {args.command}")
 

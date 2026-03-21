@@ -27,8 +27,8 @@ def main() -> None:
         [
             Path("./skills"),
             # 単一 skill を使うならこちらでもよい:
-            # Path("./skills/repo-map"),
-            # Path("./skills/repo-map/SKILL.md"),
+            # Path("./skills/office-to-markdown"),
+            # Path("./skills/office-to-markdown/SKILL.md"),
         ]
     )
 
@@ -47,7 +47,7 @@ def main() -> None:
         openai_log_file=Path("./logs/openai-chat-completions.jsonl"),
     )
 
-    result = agent.run("このリポジトリの概要を教えて")
+    result = agent.run("pptxをマークダウンに変換して")
 
     print("selected_skills:", result["selected_skills"])
     print("final:")
@@ -65,7 +65,7 @@ if __name__ == "__main__":
 
 - CLI の `--skills` に相当するものは `SkillRegistry([...])` に渡す `Path` 一覧です
 - `Path("./skills")` を渡すと、その配下の `*/SKILL.md` を走査します
-- `Path("./skills/repo-map")` や `Path("./skills/repo-map/SKILL.md")` を渡すと単一 skill だけを登録できます
+- `Path("./skills/office-to-markdown")` や `Path("./skills/office-to-markdown/SKILL.md")` を渡すと単一 skill だけを登録できます
 - `allow_scripts=True` のときだけ `scripts/` 配下の `.py` を実行できます
 - workspace のルートパスや内容は最初からモデルに送りません
 - 必要なときだけ `list_directory` と `read_file` で取得します

@@ -164,71 +164,79 @@ def test_recommend_downloads_and_reads_online_archive(workspace_dir: Path):
     payload = json.loads(completed.stdout)
 
     assert payload["skills"][0]["name"] == "python-testing"
+    assert (
+        workspace_dir
+        / payload["source_dir"]
+        / "python-testing"
+        / "SKILL.md"
+    ).is_file()
 
 
-def test_archive_creates_zip_with_selected_skill_directories(workspace_dir: Path):
-    source_dir = workspace_dir / "archive"
-    output_dir = workspace_dir / "bundles"
+def test_copy_copies_selected_skills_into_claude_directory(workspace_dir: Path):
+    source_dir = workspace_dir / "copy-source"
     write_skill(source_dir / "repo-map", "repo-map", "Map repositories.")
     write_skill(source_dir / "python-testing", "python-testing", "Write pytest suites.")
 
     completed = run_script(
         workspace_dir,
-        "archive",
+        "copy",
         "--source-dir",
         str(source_dir),
         "--skills",
         "repo-map",
         "python-testing",
-        "--group-name",
-        "engineering-pack",
-        "--output-dir",
-        str(output_dir),
+        "--target",
+        "claude",
         "--limit",
         "2",
     )
     payload = json.loads(completed.stdout)
-    archive_path = output_dir / payload["archive"]
 
-    assert archive_path.is_file()
-    with zipfile.ZipFile(archive_path) as archive:
-        names = set(archive.namelist())
-    assert "engineering-pack/repo-map/SKILL.md" in names
-    assert "engineering-pack/python-testing/scripts/run.py" in names
-
-
-def test_archive_rejects_more_skills_than_limit(workspace_dir: Path):
-    source_dir = workspace_dir / "limit"
-    write_skill(source_dir / "one", "one", "First.")
-    write_skill(source_dir / "two", "two", "Second.")
-
-    completed = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT_PATH),
-            "--workspace",
-            str(workspace_dir),
-            "archive",
-            "--source-dir",
-            str(source_dir),
-            "--skills",
-            "one",
-            "two",
-            "--limit",
-            "1",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert completed.returncode != 0
-    assert "limit is 1" in completed.stderr or "limit is 1" in completed.stdout
+    assert payload["target_dir"] == ".claude/skills"
+    assert sorted(payload["skills"]) == ["python-testing", "repo-map"]
+    assert payload["skipped"] == []
+    assert (workspace_dir / ".claude" / "skills" / "repo-map" / "SKILL.md").is_file()
+    assert (workspace_dir / ".claude" / "skills" / "python-testing" / "scripts" / "run.py").is_file()
 
 
-def test_archive_rejects_output_dir_that_duplicates_workspace_name(workspace_dir: Path):
-    source_dir = workspace_dir / "duplicate-output"
+def test_skill_md_prefers_github_standard_destination():
+    skill_md = SKILL_MD_PATH.read_text(encoding="utf-8")
+
+    assert "Prefer `--target github` or `--target claude`" in skill_md
+    assert "prefer GitHub-style placement in `.github/skills`" in skill_md
+
+
+def test_copy_skips_existing_skill_directory(workspace_dir: Path):
+    source_dir = workspace_dir / "copy-replace-source"
     write_skill(source_dir / "repo-map", "repo-map", "Map repositories.")
+    target_skill_dir = workspace_dir / ".github" / "skills" / "repo-map"
+    target_skill_dir.mkdir(parents=True)
+    (target_skill_dir / "stale.txt").write_text("stale\n", encoding="utf-8")
+
+    completed = run_script(
+        workspace_dir,
+        "copy",
+        "--source-dir",
+        str(source_dir),
+        "--skills",
+        "repo-map",
+        "--target",
+        "github",
+        "--limit",
+        "1",
+    )
+    payload = json.loads(completed.stdout)
+
+    assert payload["copied"] == []
+    assert payload["skipped"] == [".github/skills/repo-map"]
+    assert (target_skill_dir / "stale.txt").is_file()
+    assert not (target_skill_dir / "SKILL.md").exists()
+
+
+def test_copy_rejects_target_dir_outside_workspace(workspace_dir: Path):
+    source_dir = workspace_dir / "copy-outside-source"
+    write_skill(source_dir / "repo-map", "repo-map", "Map repositories.")
+    outside_dir = workspace_dir.parent / "outside-skills"
 
     completed = subprocess.run(
         [
@@ -236,13 +244,13 @@ def test_archive_rejects_output_dir_that_duplicates_workspace_name(workspace_dir
             str(SCRIPT_PATH),
             "--workspace",
             str(workspace_dir),
-            "archive",
+            "copy",
             "--source-dir",
             str(source_dir),
             "--skills",
             "repo-map",
-            "--output-dir",
-            workspace_dir.name,
+            "--target-dir",
+            str(outside_dir),
             "--limit",
             "1",
         ],
@@ -252,6 +260,50 @@ def test_archive_rejects_output_dir_that_duplicates_workspace_name(workspace_dir
     )
 
     assert completed.returncode != 0
-    assert "duplicates the workspace name" in completed.stderr or (
-        "duplicates the workspace name" in completed.stdout
+    assert "outside the workspace" in completed.stderr or (
+        "outside the workspace" in completed.stdout
     )
+
+
+def test_cleanup_runtime_cache_after_failed_source_url(workspace_dir: Path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--workspace",
+            str(workspace_dir),
+            "catalog",
+            "--source-url",
+            str(workspace_dir / "missing.zip"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert (
+        workspace_dir / ".tiny-skill-agent-skills-bundler-cache"
+    ).is_dir()
+
+
+def test_copy_accepts_source_dir_relative_to_workspace(workspace_dir: Path):
+    source_dir = workspace_dir / "copy-source"
+    write_skill(source_dir / "repo-map", "repo-map", "Map repositories.")
+
+    completed = run_script(
+        workspace_dir,
+        "copy",
+        "--source-dir",
+        "copy-source",
+        "--skills",
+        "repo-map",
+        "--target",
+        "claude",
+        "--limit",
+        "1",
+    )
+    payload = json.loads(completed.stdout)
+
+    assert payload["skills"] == ["repo-map"]
+    assert (workspace_dir / ".claude" / "skills" / "repo-map" / "SKILL.md").is_file()
