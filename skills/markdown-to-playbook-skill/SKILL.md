@@ -1,8 +1,8 @@
 ---
-name: design-to-playbook-skill
-description: Use this skill when the user wants to turn one or more software-design Markdown files into a new Agent Skill for a software development company. The generated Skill must help an agent read design information and then write or modify production code using a reference-backed implementation playbook. Activate it for requests involving requirements docs, feature design docs, architecture notes, API specs, schema docs, ADRs, or implementation plans, especially when the result should separate operational guidance in SKILL.md from detailed engineering references.
+name: markdown-to-playbook-skill
+description: Use this skill when the user wants to turn one or more Markdown design, requirements, architecture, API, schema, ADR, or implementation-plan files into a new Agent Skill for a software development company. The generated Skill must help an agent read Markdown source material and then write or modify production code using a reference-backed implementation playbook, especially when the result should separate operational guidance in SKILL.md from detailed engineering references.
 ---
-# Design to playbook skill
+# Markdown to playbook skill
 
 Use this skill only for creating or updating a Skill whose source of truth is a software design Markdown file.
 The generated Skill must help another Codex instance move from design to code inside a software development workflow, not merely summarize the document.

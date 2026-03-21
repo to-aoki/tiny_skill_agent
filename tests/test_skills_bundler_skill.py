@@ -82,6 +82,13 @@ def test_skill_files_exist():
     assert SCRIPT_PATH.is_file()
 
 
+def test_script_declares_pep_723_metadata():
+    text = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "# /// script" in text
+    assert '"PyYAML>=' in text
+
+
 def test_catalog_lists_direct_child_skills(workspace_dir: Path):
     source_dir = workspace_dir / "catalog"
     write_skill(source_dir / "repo-map", "repo-map", "Map repositories.")
@@ -204,6 +211,7 @@ def test_skill_md_prefers_github_standard_destination():
 
     assert "Prefer `--target github` or `--target claude`" in skill_md
     assert "prefer GitHub-style placement in `.github/skills`" in skill_md
+    assert "`uv run scripts/skills_bundler.py catalog" in skill_md
 
 
 def test_copy_skips_existing_skill_directory(workspace_dir: Path):

@@ -1,7 +1,7 @@
 ---
 name: skills-bundler
 description: Use this skill when the user wants to browse a directory that contains many Agent Skills, choose a subset that matches a request, and install the selected skill folders into workspace directories such as `.github/skills` or `.claude/skills`. Use it for cloned skill collections such as `awesome-copilot/skills` and for copying up to a requested count of skills at a time.
-compatibility: Python 3.10+ recommended. Bundled Python script catalogs skills, recommends matches from a query, and copies selected skills into workspace directories.
+compatibility: Python 3.10+ recommended. Bundled Python script uses PEP 723 inline metadata and PyYAML via uv run, then catalogs skills, recommends matches from a query, and copies selected skills into workspace directories.
 allowed-tools:
   - read
   - write
@@ -48,27 +48,27 @@ Source inspection and archive output must stay inside the workspace scope provid
 
 Catalog:
 
-`python scripts/skills_bundler.py catalog --source-dir <skills-directory>`
+`uv run scripts/skills_bundler.py catalog --source-dir <skills-directory>`
 
 Online catalog:
 
-`python scripts/skills_bundler.py catalog --source-url https://github.com/github/awesome-copilot`
+`uv run scripts/skills_bundler.py catalog --source-url https://github.com/github/awesome-copilot`
 
 Recommend:
 
-`python scripts/skills_bundler.py recommend --source-dir <skills-directory> --query "<user request>" --limit 5`
+`uv run scripts/skills_bundler.py recommend --source-dir <skills-directory> --query "<user request>" --limit 5`
 
 Online recommend:
 
-`python scripts/skills_bundler.py recommend --source-url https://github.com/github/awesome-copilot --query "<user request>" --limit 5`
+`uv run scripts/skills_bundler.py recommend --source-url https://github.com/github/awesome-copilot --query "<user request>" --limit 5`
 
 Copy into `.github/skills`:
 
-`python scripts/skills_bundler.py copy --source-dir <skills-directory> --skills <skill-a> <skill-b> --target github --limit 5`
+`uv run scripts/skills_bundler.py copy --source-dir <skills-directory> --skills <skill-a> <skill-b> --target github --limit 5`
 
 Copy into `.claude/skills`:
 
-`python scripts/skills_bundler.py copy --source-dir <skills-directory> --skills <skill-a> <skill-b> --target claude --limit 5`
+`uv run scripts/skills_bundler.py copy --source-dir <skills-directory> --skills <skill-a> <skill-b> --target claude --limit 5`
 
 Optional copy argument:
 

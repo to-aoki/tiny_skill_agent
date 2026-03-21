@@ -240,6 +240,22 @@ def test_run_skill_script_decodes_utf8_output(valid_skill, workspace_dir):
     assert payload["label"] == "変換🙂"
 
 
+def test_run_skill_script_uses_uv_for_pep_723_script(valid_skill, workspace_dir):
+    result = tiny_skill_agent.run_skill_script(
+        valid_skill,
+        "scripts/pep723_echo.py",
+        ["--label", "inline"],
+        workspace_dir,
+    )
+    payload = json.loads(result["stdout"])
+
+    assert result["returncode"] == 0
+    assert result["cmd"][:2] == ["uv", "run"] or result["cmd"][:2][1:] == ["run"]
+    assert payload["workspace"] == str(workspace_dir.resolve())
+    assert "--label" in payload["args"]
+    assert "inline" in payload["args"]
+
+
 def test_run_skill_script_rejects_non_python_script(valid_skill, workspace_dir):
     with pytest.raises(SystemExit, match="Only Python scripts under scripts/ can be executed"):
         tiny_skill_agent.run_skill_script(valid_skill, "scripts/not_python.sh", [], workspace_dir)

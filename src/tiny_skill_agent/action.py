@@ -145,6 +145,20 @@ class ActionOperations:
     """高水準の ACTION 処理を提供する。"""
 
     @staticmethod
+    def script_uses_inline_metadata(script_path: Path) -> bool:
+        """PEP 723 の inline metadata を持つスクリプトか判定する。"""
+        try:
+            with script_path.open("r", encoding="utf-8") as handle:
+                for index, line in enumerate(handle):
+                    if index > 40:
+                        break
+                    if line.strip() == "# /// script":
+                        return True
+        except UnicodeDecodeError:
+            return False
+        return False
+
+    @staticmethod
     def read_file_for_action(
         workspace: Path,
         selected_skill: Any,
@@ -351,6 +365,7 @@ class ActionOperations:
         """スキル同梱の Python スクリプトを実行する。"""
         import os
         import subprocess
+        import shutil
         import sys
 
         from .skill_files import resolve_skill_file_request
@@ -364,7 +379,16 @@ class ActionOperations:
             allow_search=True,
             kind="scripts",
         )
-        cmd = [sys.executable, str(script_path), "--workspace", str(workspace), *args]
+        uses_inline_metadata = ActionOperations.script_uses_inline_metadata(script_path)
+        if uses_inline_metadata:
+            uv_path = shutil.which("uv")
+            if not uv_path:
+                raise SystemExit(
+                    "The script uses PEP 723 inline metadata, but 'uv' is not installed."
+                )
+            cmd = [uv_path, "run", str(script_path), "--workspace", str(workspace), *args]
+        else:
+            cmd = [sys.executable, str(script_path), "--workspace", str(workspace), *args]
         completed = subprocess.run(
             cmd,
             cwd=str(workspace),
@@ -403,3 +427,4 @@ create_file = ActionOperations.create_file
 replace_string_in_file = ActionOperations.replace_string_in_file
 insert_edit_into_file = ActionOperations.insert_edit_into_file
 run_skill_script = ActionOperations.run_skill_script
+script_uses_inline_metadata = ActionOperations.script_uses_inline_metadata

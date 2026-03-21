@@ -1,4 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "PyYAML>=6.0.2",
+# ]
+# ///
 from __future__ import annotations
 
 import argparse
@@ -16,7 +22,9 @@ from zipfile import ZipFile
 try:
     import yaml
 except ImportError as exc:  # pragma: no cover
-    raise SystemExit("PyYAML is required to run this script.") from exc
+    raise SystemExit(
+        "PyYAML is required to run this script. Run it with 'uv run' so PEP 723 dependencies are installed."
+    ) from exc
 
 
 SKIP_PARTS = {
