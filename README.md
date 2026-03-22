@@ -32,10 +32,16 @@ uv run tiny-skill-agent --skills ./skills --show-catalog
 uv run tiny-skill-agent "pptxをマークダウンに変換して" --workspace . --skills ./skills --allow-scripts
 ```
 
-### OpenAI API ログ出力
+### OpenTelemetry をローカルファイルへ出力
 
 ```bash
-uv run tiny-skill-agent "pptxをマークダウンに変換して" --workspace . --skills ./skills --allow-scripts --openai-log-file ./logs/openai-chat-completions.jsonl
+uv run tiny-skill-agent "pptxをマークダウンに変換して" --workspace . --skills ./skills --allow-scripts --openai-telemetry-file ./logs/openai-telemetry.jsonl
+```
+
+### OpenTelemetry を OTLP endpoint へ送信
+
+```bash
+uv run tiny-skill-agent "pptxをマークダウンに変換して" --workspace . --skills ./skills --allow-scripts --otel-endpoint http://127.0.0.1:4318/v1/traces
 ```
 
 ### SKILL.md の検証
@@ -117,7 +123,9 @@ if __name__ == "__main__":
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL_NAME`
 - `OPENAI_MODEL`
-- `OPENAI_API_LOG_FILE`
+- `OPENAI_TELEMETRY_FILE`
+- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+- `OTEL_EXPORTER_OTLP_ENDPOINT`
 
 ## 補足
 
