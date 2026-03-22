@@ -49,7 +49,7 @@ from .skills import (
     normalize_selected_skill_names,
     resolve_action_skill,
 )
-from .telemetry import OpenAITelemetryEmitter, build_openai_telemetry_emitter
+from .telemetry import OpenAITelemetryEmitter
 from .utils import (
     extract_response_text,
     parse_json_from_text,
@@ -99,7 +99,6 @@ class SkillAgent:
         workspace: Path,
         allow_scripts: bool = False,
         max_skill_turns: int = 8,
-        openai_log_file: Path | None = None,
         openai_telemetry: OpenAITelemetryEmitter | None = None,
     ) -> None:
         """エージェント実行に必要な依存関係と設定を保持する。"""
@@ -111,10 +110,6 @@ class SkillAgent:
         self.max_skill_turns = max(1, max_skill_turns)
         self._selected_skill_names: list[str] = []
         self.openai_telemetry = openai_telemetry
-        if self.openai_telemetry is None and openai_log_file is not None:
-            self.openai_telemetry = build_openai_telemetry_emitter(
-                openai_log_file.resolve()
-            )
 
     def run(self, task: str) -> dict[str, Any]:
         """タスクに対してスキル選択から最終応答生成まで実行する。"""

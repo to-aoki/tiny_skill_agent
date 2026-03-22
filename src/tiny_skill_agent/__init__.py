@@ -70,8 +70,6 @@ from .telemetry import (
     resolve_project_version,
 )
 from .utils import (
-    append_jsonl_log,
-    current_timestamp_iso,
     extract_response_text,
     flatten_text_content,
     parse_json_from_text,

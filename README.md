@@ -88,7 +88,11 @@ import os
 
 from openai import OpenAI
 
-from tiny_skill_agent import SkillAgent, SkillRegistry
+from tiny_skill_agent import (
+    SkillAgent,
+    SkillRegistry,
+    build_openai_telemetry_emitter,
+)
 
 
 def main() -> None:
@@ -105,6 +109,9 @@ def main() -> None:
         workspace=Path(".").resolve(),
         allow_scripts=True,
         max_skill_turns=8,
+        openai_telemetry=build_openai_telemetry_emitter(
+            otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+        ),
     )
 
     result = agent.run("このリポジトリの概要を教えて")
@@ -116,6 +123,8 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 ```
+
+`openai_telemetry` は省略できます。ローカル保存したい場合は `file_path=Path("./logs/openai-telemetry.jsonl")`、OTLP 送信したい場合は `otlp_endpoint="http://127.0.0.1:4318/v1/traces"` を渡します。
 
 ## 環境変数
 

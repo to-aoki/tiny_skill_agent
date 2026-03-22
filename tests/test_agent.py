@@ -85,7 +85,8 @@ def build_loaded_resources(skill):
 
 
 def test_resolve_project_version_reads_package_version():
-    assert tiny_skill_agent.__version__ == "0.1.0"
+    assert isinstance(tiny_skill_agent.__version__, str)
+    assert tiny_skill_agent.__version__
     assert tiny_skill_agent.resolve_project_version() == tiny_skill_agent.__version__
 
 

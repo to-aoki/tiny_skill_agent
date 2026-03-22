@@ -1,10 +1,8 @@
-"""テキスト処理とログ出力の共通ユーティリティ。"""
+"""テキスト処理の共通ユーティリティ。"""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import re
 from typing import Any
 
@@ -83,11 +81,6 @@ def flatten_text_content(content: Any) -> str:
     return ""
 
 
-def current_timestamp_iso() -> str:
-    """UTC 現在時刻を ISO 8601 形式で返す。"""
-    return datetime.now(timezone.utc).isoformat()
-
-
 def serialize_openai_response(response: Any) -> Any:
     """OpenAI 応答をログ保存しやすい形へ変換する。"""
     if hasattr(response, "model_dump"):
@@ -98,10 +91,3 @@ def serialize_openai_response(response: Any) -> Any:
     if isinstance(response, dict):
         return response
     return {"repr": repr(response)}
-
-
-def append_jsonl_log(path: Path, payload: dict[str, Any]) -> None:
-    """JSONL ログへ 1 レコード追記する。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")

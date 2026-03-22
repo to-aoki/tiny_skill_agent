@@ -17,7 +17,11 @@ import os
 
 from openai import OpenAI
 
-from tiny_skill_agent import SkillAgent, SkillRegistry
+from tiny_skill_agent import (
+    SkillAgent,
+    SkillRegistry,
+    build_openai_telemetry_emitter,
+)
 
 
 def main() -> None:
@@ -44,7 +48,10 @@ def main() -> None:
         workspace=workspace,
         allow_scripts=True,
         max_skill_turns=8,
-        openai_log_file=Path("./logs/openai-chat-completions.jsonl"),
+        openai_telemetry=build_openai_telemetry_emitter(
+            file_path=Path("./logs/openai-telemetry.jsonl"),
+            otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+        ),
     )
 
     result = agent.run("pptxをマークダウンに変換して")
@@ -69,7 +76,7 @@ if __name__ == "__main__":
 - `allow_scripts=True` のときだけ `scripts/` 配下の `.py` を実行できます
 - workspace のルートパスや内容は最初からモデルに送りません
 - 必要なときだけ `list_directory` と `read_file` で取得します
-- `openai_log_file=Path(...)` または CLI の `--openai-log-file` を使うと OpenAI API の request / response / error を JSONL で保存できます
+- `openai_telemetry=build_openai_telemetry_emitter(...)` を渡すと OpenTelemetry をローカル JSONL や OTLP endpoint へ出力できます
 - `agent.run(...)` の戻り値は dict で、`final`, `selected_skills`, `script_runs`, `resource_reads`, `workspace_reads`, `workspace_writes`, `session_steps` などを含みます
 
 ## workspace の扱い
@@ -117,6 +124,35 @@ def run_agent(task: str) -> str:
 ```bash
 uv run tiny-skill-agent "このリポジトリの概要を教えて" --workspace . --skills ./skills --allow-scripts
 ```
+
+```bash
+uv run tiny-skill-agent "このリポジトリの概要を教えて" --workspace . --skills ./skills --allow-scripts --otel-endpoint http://127.0.0.1:4318/v1/traces
+```
+
+## wheel を作成する
+
+`dist/` に wheel を出力するには、プロジェクトルートで次を実行します。
+
+```bash
+uv build
+```
+
+`python -m build` を使う場合は、事前に `build` を install してから実行します。
+
+```bash
+pip install build
+python -m build --wheel
+```
+
+生成物は `dist/*.whl` に出力されます。
+
+作成した wheel を install するには、対象の仮想環境で次を実行します。
+
+```bash
+pip install dist/tiny_skill_agent-0.1.0-py3-none-any.whl
+```
+
+バージョン番号を固定したくない場合は、シェルに応じて `dist` 配下の wheel を指定してください。
 
 ## 注意
 
