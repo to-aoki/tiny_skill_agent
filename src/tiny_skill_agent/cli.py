@@ -16,6 +16,7 @@ from .skills import (
     summarize_blocking_skill_errors,
     validate_skill_roots,
 )
+from .telemetry import build_openai_telemetry_emitter
 
 
 def cli() -> argparse.Namespace:
@@ -40,9 +41,17 @@ def cli() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--openai-log-file",
-        default=os.getenv("OPENAI_API_LOG_FILE"),
-        help="Append OpenAI API request/response logs as JSONL.",
+        "--openai-telemetry-file",
+        default=os.getenv("OPENAI_TELEMETRY_FILE"),
+        help="Write OpenTelemetry spans for OpenAI calls as JSONL.",
+    )
+    parser.add_argument(
+        "--otel-endpoint",
+        default=(
+            os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+            or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        ),
+        help="Send OpenTelemetry spans to this OTLP HTTP endpoint.",
     )
     parser.add_argument("--allow-scripts", action="store_true")
     parser.add_argument(
@@ -92,7 +101,16 @@ def main() -> None:
         raise SystemExit("No skills were found. Add a ./skills/<skill-name>/SKILL.md folder.")
 
     client = OpenAI(base_url=args.base_url, api_key=args.api_key)
-    openai_log_file = Path(args.openai_log_file) if args.openai_log_file else None
+    openai_telemetry = (
+        build_openai_telemetry_emitter(
+            file_path=Path(args.openai_telemetry_file)
+            if args.openai_telemetry_file
+            else None,
+            otlp_endpoint=args.otel_endpoint,
+        )
+        if args.openai_telemetry_file or args.otel_endpoint
+        else None
+    )
     agent = SkillAgent(
         client=client,
         model=args.model,
@@ -100,6 +118,6 @@ def main() -> None:
         workspace=workspace,
         allow_scripts=args.allow_scripts,
         max_skill_turns=args.max_skill_turns,
-        openai_log_file=openai_log_file,
+        openai_telemetry=openai_telemetry,
     )
     print(json.dumps(agent.run(args.task), ensure_ascii=False, indent=2))

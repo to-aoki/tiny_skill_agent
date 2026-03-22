@@ -1,8 +1,17 @@
 from pathlib import Path
 import json
+import shutil
 
 import tiny_skill_agent.agent as agent_module
 import tiny_skill_agent
+
+
+class InMemoryTelemetry:
+    def __init__(self):
+        self.records = []
+
+    def emit_chat_completion(self, **kwargs):
+        self.records.append(kwargs)
 
 
 class StubAgent(tiny_skill_agent.SkillAgent):
@@ -75,8 +84,26 @@ def build_loaded_resources(skill):
     return {skill.name: {}}
 
 
-def test_plain_chat_writes_openai_jsonl_log(workspace_dir):
-    log_file = workspace_dir / "logs" / "openai.jsonl"
+def test_resolve_project_version_reads_package_version():
+    assert tiny_skill_agent.__version__ == "0.1.0"
+    assert tiny_skill_agent.resolve_project_version() == tiny_skill_agent.__version__
+
+
+def copy_skill_with_selected_scripts(
+    source_skill: tiny_skill_agent.Skill,
+    destination: Path,
+    keep_scripts: set[str],
+) -> tiny_skill_agent.Skill:
+    shutil.copytree(source_skill.root, destination)
+    scripts_dir = destination / "scripts"
+    for script_path in scripts_dir.iterdir():
+        if script_path.name not in keep_scripts:
+            script_path.unlink()
+    return tiny_skill_agent.load_skill(destination)
+
+
+def test_plain_chat_emits_openai_telemetry(workspace_dir):
+    telemetry = InMemoryTelemetry()
     response_payload = {
         "id": "chatcmpl-test",
         "object": "chat.completion",
@@ -96,30 +123,29 @@ def test_plain_chat_writes_openai_jsonl_log(workspace_dir):
         model="stub-model",
         registry=None,
         workspace=workspace_dir,
-        openai_log_file=log_file,
+        openai_telemetry=telemetry,
     )
 
     text = agent._plain_chat("system prompt", "user prompt")
 
     assert text == "logged answer"
-    lines = log_file.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 1
-    payload = json.loads(lines[0])
-    assert payload["api"] == "chat.completions"
+    assert len(telemetry.records) == 1
+    payload = telemetry.records[0]
     assert payload["request"]["model"] == "stub-model"
     assert payload["request"]["messages"][0]["role"] == "system"
-    assert payload["response"]["id"] == "chatcmpl-test"
+    assert payload["response"].model_dump()["id"] == "chatcmpl-test"
+    assert payload["attempt"] == 1
 
 
-def test_plain_chat_logs_openai_error(workspace_dir):
-    log_file = workspace_dir / "logs" / "openai-errors.jsonl"
+def test_plain_chat_emits_openai_error_telemetry(workspace_dir):
+    telemetry = InMemoryTelemetry()
     completions = FakeCompletions(error=RuntimeError("boom"))
     agent = tiny_skill_agent.SkillAgent(
         client=FakeClient(completions),
         model="stub-model",
         registry=None,
         workspace=workspace_dir,
-        openai_log_file=log_file,
+        openai_telemetry=telemetry,
     )
 
     try:
@@ -129,16 +155,15 @@ def test_plain_chat_logs_openai_error(workspace_dir):
     else:
         raise AssertionError("RuntimeError was not raised")
 
-    lines = log_file.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 1
-    payload = json.loads(lines[0])
-    assert payload["api"] == "chat.completions"
-    assert payload["error"]["type"] == "RuntimeError"
-    assert payload["error"]["message"] == "boom"
+    assert len(telemetry.records) == 1
+    payload = telemetry.records[0]
+    assert type(payload["error"]).__name__ == "RuntimeError"
+    assert str(payload["error"]) == "boom"
+    assert payload["retryable"] is False
 
 
 def test_plain_chat_retries_retryable_openai_errors(monkeypatch, workspace_dir):
-    log_file = workspace_dir / "logs" / "openai-retry.jsonl"
+    telemetry = InMemoryTelemetry()
     response_payload = {
         "id": "chatcmpl-retry",
         "object": "chat.completion",
@@ -158,7 +183,7 @@ def test_plain_chat_retries_retryable_openai_errors(monkeypatch, workspace_dir):
         model="stub-model",
         registry=None,
         workspace=workspace_dir,
-        openai_log_file=log_file,
+        openai_telemetry=telemetry,
     )
     monkeypatch.setattr(agent_module, "OPENAI_RETRYABLE_ERRORS", (RuntimeError,))
     monkeypatch.setattr(agent_module.time, "sleep", lambda _: None)
@@ -167,26 +192,25 @@ def test_plain_chat_retries_retryable_openai_errors(monkeypatch, workspace_dir):
 
     assert text == "retried answer"
     assert len(completions.calls) == 2
-    lines = log_file.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2
-    first = json.loads(lines[0])
-    second = json.loads(lines[1])
+    assert len(telemetry.records) == 2
+    first = telemetry.records[0]
+    second = telemetry.records[1]
     assert first["attempt"] == 1
     assert first["retryable"] is True
-    assert first["error"]["message"] == "temporary"
+    assert str(first["error"]) == "temporary"
     assert second["attempt"] == 2
-    assert second["response"]["id"] == "chatcmpl-retry"
+    assert second["response"].model_dump()["id"] == "chatcmpl-retry"
 
 
 def test_plain_chat_exits_cleanly_after_retryable_openai_failures(monkeypatch, workspace_dir):
-    log_file = workspace_dir / "logs" / "openai-retry-exhausted.jsonl"
+    telemetry = InMemoryTelemetry()
     completions = FakeCompletions(error=RuntimeError("still down"))
     agent = tiny_skill_agent.SkillAgent(
         client=FakeClient(completions),
         model="stub-model",
         registry=None,
         workspace=workspace_dir,
-        openai_log_file=log_file,
+        openai_telemetry=telemetry,
     )
     monkeypatch.setattr(agent_module, "OPENAI_RETRYABLE_ERRORS", (RuntimeError,))
     monkeypatch.setattr(agent_module, "OPENAI_MAX_RETRIES", 1)
@@ -201,9 +225,8 @@ def test_plain_chat_exits_cleanly_after_retryable_openai_failures(monkeypatch, w
         raise AssertionError("SystemExit was not raised")
 
     assert len(completions.calls) == 2
-    lines = log_file.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2
-    second = json.loads(lines[1])
+    assert len(telemetry.records) == 2
+    second = telemetry.records[1]
     assert second["attempt"] == 2
     assert second["retryable"] is True
 
@@ -456,6 +479,11 @@ def test_run_skill_session_runs_script_then_respond(valid_skill, workspace_dir):
 
 
 def test_run_skill_session_infers_single_available_script(valid_skill, workspace_dir):
+    single_script_skill = copy_skill_with_selected_scripts(
+        valid_skill,
+        workspace_dir / "single-script-skill",
+        {"echo_workspace.py", "not_python.sh"},
+    )
     agent = StubAgent([
         {
             "action": "run_script",
@@ -473,11 +501,11 @@ def test_run_skill_session_infers_single_available_script(valid_skill, workspace
             "reason": "Finished.",
         },
     ], workspace=workspace_dir, allow_scripts=True)
-    loaded_resources = build_loaded_resources(valid_skill)
+    loaded_resources = build_loaded_resources(single_script_skill)
 
     final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes = agent._run_skill_session(
         "summarize",
-        [valid_skill],
+        [single_script_skill],
         loaded_resources,
     )
 
@@ -621,4 +649,3 @@ def test_run_skill_session_records_unknown_action_dispatch(valid_skill, workspac
     assert workspace_writes == []
     assert dispatch_step["status"] == "error"
     assert "Unknown action: unsupported_action" in dispatch_step["data"]["error"]
-

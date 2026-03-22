@@ -49,12 +49,10 @@ from .skills import (
     normalize_selected_skill_names,
     resolve_action_skill,
 )
+from .telemetry import OpenAITelemetryEmitter, build_openai_telemetry_emitter
 from .utils import (
-    append_jsonl_log,
-    current_timestamp_iso,
     extract_response_text,
     parse_json_from_text,
-    serialize_openai_response,
     strip_thinking,
     truncate_text,
 )
@@ -102,6 +100,7 @@ class SkillAgent:
         allow_scripts: bool = False,
         max_skill_turns: int = 8,
         openai_log_file: Path | None = None,
+        openai_telemetry: OpenAITelemetryEmitter | None = None,
     ) -> None:
         """エージェント実行に必要な依存関係と設定を保持する。"""
         self.client = client
@@ -110,9 +109,11 @@ class SkillAgent:
         self.workspace = workspace.resolve()
         self.allow_scripts = allow_scripts
         self.max_skill_turns = max(1, max_skill_turns)
-        self.openai_log_file = (
-            openai_log_file.resolve() if openai_log_file is not None else None
-        )
+        self.openai_telemetry = openai_telemetry
+        if self.openai_telemetry is None and openai_log_file is not None:
+            self.openai_telemetry = build_openai_telemetry_emitter(
+                openai_log_file.resolve()
+            )
 
     def run(self, task: str) -> dict[str, Any]:
         """タスクに対してスキル選択から最終応答生成まで実行する。"""
@@ -215,22 +216,12 @@ class SkillAgent:
                 response = self.client.chat.completions.create(**request_payload)
             except Exception as exc:
                 retryable = isinstance(exc, OPENAI_RETRYABLE_ERRORS)
-                self._append_openai_log(
-                    {
-                        "timestamp": current_timestamp_iso(),
-                        "api": "chat.completions",
-                        "request": request_payload,
-                        "attempt": attempt,
-                        "retryable": retryable,
-                        "error": {
-                            "type": type(exc).__name__,
-                            "message": str(exc),
-                        },
-                        "duration_ms": round(
-                            (time.perf_counter() - started_at) * 1000,
-                            3,
-                        ),
-                    }
+                self._emit_openai_telemetry(
+                    request=request_payload,
+                    attempt=attempt,
+                    duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+                    error=exc,
+                    retryable=retryable,
                 )
                 if not retryable:
                     raise
@@ -247,18 +238,11 @@ class SkillAgent:
                 time.sleep(0.5 * attempt)
                 continue
 
-            self._append_openai_log(
-                {
-                    "timestamp": current_timestamp_iso(),
-                    "api": "chat.completions",
-                    "request": request_payload,
-                    "attempt": attempt,
-                    "response": serialize_openai_response(response),
-                    "duration_ms": round(
-                        (time.perf_counter() - started_at) * 1000,
-                        3,
-                    ),
-                }
+            self._emit_openai_telemetry(
+                request=request_payload,
+                attempt=attempt,
+                duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+                response=response,
             )
             break
 
@@ -282,16 +266,31 @@ class SkillAgent:
             f"Could not extract assistant text from model response: {response!r}"
         )
 
-    def _append_openai_log(self, payload: dict[str, Any]) -> None:
-        """OpenAI API の入出力ログを JSONL に追記する。"""
-        if self.openai_log_file is None:
+    def _emit_openai_telemetry(
+        self,
+        *,
+        request: dict[str, Any],
+        attempt: int,
+        duration_ms: float,
+        response: Any | None = None,
+        error: Exception | None = None,
+        retryable: bool | None = None,
+    ) -> None:
+        """OpenAI API 呼び出しを OpenTelemetry emitter へ流す。"""
+        if self.openai_telemetry is None:
             return
         try:
-            append_jsonl_log(self.openai_log_file, payload)
+            self.openai_telemetry.emit_chat_completion(
+                request=request,
+                attempt=attempt,
+                duration_ms=duration_ms,
+                response=response,
+                error=error,
+                retryable=retryable,
+            )
         except Exception as exc:
             print(
-                f"Warning: could not write OpenAI API log to "
-                f"{self.openai_log_file}: {exc}",
+                f"Warning: could not emit OpenAI telemetry: {exc}",
                 file=sys.stderr,
             )
 

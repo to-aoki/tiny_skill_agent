@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+__version__ = "0.1.0"
+
 from .agent import SkillAgent, SkillSessionState
 from .action import (
     ACTION_NAMES,
@@ -59,6 +61,13 @@ from .skill_files import (
     read_text_resource,
     read_skill_resource,
     resolve_skill_file_request,
+)
+from .telemetry import (
+    DEFAULT_SERVICE_NAME,
+    DEFAULT_TRACER_NAME,
+    OpenAITelemetryEmitter,
+    build_openai_telemetry_emitter,
+    resolve_project_version,
 )
 from .utils import (
     append_jsonl_log,
