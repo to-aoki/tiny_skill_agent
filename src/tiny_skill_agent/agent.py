@@ -109,6 +109,7 @@ class SkillAgent:
         self.workspace = workspace.resolve()
         self.allow_scripts = allow_scripts
         self.max_skill_turns = max(1, max_skill_turns)
+        self._selected_skill_names: list[str] = []
         self.openai_telemetry = openai_telemetry
         if self.openai_telemetry is None and openai_log_file is not None:
             self.openai_telemetry = build_openai_telemetry_emitter(
@@ -117,6 +118,7 @@ class SkillAgent:
 
     def run(self, task: str) -> dict[str, Any]:
         """タスクに対してスキル選択から最終応答生成まで実行する。"""
+        self._selected_skill_names = []
         available_skills = sorted(
             self.registry.skills.values(),
             key=lambda item: item.name,
@@ -149,6 +151,7 @@ class SkillAgent:
                 skill = self.registry.get(name)
                 if skill is not None and skill not in selected_skills:
                     selected_skills.append(skill)
+        self._selected_skill_names = [skill.name for skill in selected_skills]
 
         if not selected_skills:
             final_text = self._plain_chat(
@@ -284,6 +287,7 @@ class SkillAgent:
                 request=request,
                 attempt=attempt,
                 duration_ms=duration_ms,
+                selected_skills=self._selected_skill_names,
                 response=response,
                 error=error,
                 retryable=retryable,

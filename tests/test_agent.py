@@ -125,6 +125,7 @@ def test_plain_chat_emits_openai_telemetry(workspace_dir):
         workspace=workspace_dir,
         openai_telemetry=telemetry,
     )
+    agent._selected_skill_names = ["valid-skill", "another-skill"]
 
     text = agent._plain_chat("system prompt", "user prompt")
 
@@ -135,6 +136,7 @@ def test_plain_chat_emits_openai_telemetry(workspace_dir):
     assert payload["request"]["messages"][0]["role"] == "system"
     assert payload["response"].model_dump()["id"] == "chatcmpl-test"
     assert payload["attempt"] == 1
+    assert payload["selected_skills"] == ["valid-skill", "another-skill"]
 
 
 def test_plain_chat_emits_openai_error_telemetry(workspace_dir):

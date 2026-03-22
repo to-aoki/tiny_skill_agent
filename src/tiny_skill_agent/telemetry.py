@@ -26,6 +26,7 @@ class OpenAITelemetryEmitter:
         request: dict[str, Any],
         attempt: int,
         duration_ms: float,
+        selected_skills: list[str] | None = None,
         response: Any | None = None,
         error: Exception | None = None,
         retryable: bool | None = None,
@@ -41,6 +42,10 @@ class OpenAITelemetryEmitter:
         }
         if retryable is not None:
             attributes["openai.retryable"] = retryable
+        if selected_skills:
+            attributes["skill.selected_count"] = len(selected_skills)
+            attributes["skill.selected_names"] = ",".join(selected_skills)
+            attributes["skill.selected_primary"] = selected_skills[0]
         if error is not None:
             attributes["error.type"] = type(error).__name__
 
