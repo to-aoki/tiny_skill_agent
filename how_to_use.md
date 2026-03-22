@@ -154,6 +154,18 @@ pip install dist/tiny_skill_agent-0.1.0-py3-none-any.whl
 
 バージョン番号を固定したくない場合は、シェルに応じて `dist` 配下の wheel を指定してください。
 
+別リポジトリから `uv` で使う場合は、まずこのリポジトリで wheel を作成します。
+
+```bash
+uv build
+```
+
+次に、利用側の別リポジトリで生成済み wheel を依存関係として追加します。
+
+```bash
+uv add ../tiny_skill_agent/dist/tiny_skill_agent-0.1.0-py3-none-any.whl
+```
+
 ## 注意
 
 - package を import しても CLI は実行されません
