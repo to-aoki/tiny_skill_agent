@@ -456,11 +456,13 @@ def resolve_action_skill(
         return skills[0]
     normalized_script = rel_path.replace("\\", "/").lstrip("./")
     for skill in skills:
+        normalized_root_name = skill.root.name.replace("\\", "/")
+        normalized_skill_name = skill.name.replace("\\", "/")
         prefixes = {
-            f"{skill.root.name.replace('\\', '/')}/",
-            f"skills/{skill.root.name.replace('\\', '/')}/",
-            f"{skill.name.replace('\\', '/')}/",
-            f"skills/{skill.name.replace('\\', '/')}/",
+            f"{normalized_root_name}/",
+            f"skills/{normalized_root_name}/",
+            f"{normalized_skill_name}/",
+            f"skills/{normalized_skill_name}/",
         }
         if any(normalized_script.startswith(prefix) for prefix in prefixes):
             return skill
