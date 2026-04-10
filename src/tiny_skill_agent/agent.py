@@ -32,6 +32,7 @@ from .action import (
     replace_string_in_file,
     run_skill_script,
 )
+from .image_inputs import InputImage, build_openai_user_content
 from .prompt import (
     SYSTEM_ACTOR_PROMPT,
     SYSTEM_FINALIZER_PROMPT,
@@ -83,6 +84,7 @@ class SkillSessionState:
     workspace_writes: list[dict[str, Any]] = field(default_factory=list)
     session_steps: list[dict[str, Any]] = field(default_factory=list)
     loaded_workspace_files: dict[str, str] = field(default_factory=dict)
+    loaded_workspace_images: dict[str, InputImage] = field(default_factory=dict)
     listed_workspace_directories: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -165,6 +167,7 @@ class SkillAgent:
                 "script_run": None,
                 "script_runs": [],
                 "session_steps": [],
+                "input_images": [],
                 "final": final_text,
             }
 
@@ -176,6 +179,7 @@ class SkillAgent:
             session_steps,
             workspace_reads,
             workspace_writes,
+            input_images,
         ) = self._run_skill_session(task, selected_skills, loaded_resources)
         script_run = script_runs[-1] if script_runs else None
         return {
@@ -195,16 +199,25 @@ class SkillAgent:
             "script_run": script_run,
             "script_runs": script_runs,
             "session_steps": session_steps,
+            "input_images": input_images,
             "final": final_text,
         }
 
-    def _plain_chat(self, system: str, user: str) -> str:
+    def _plain_chat(
+        self,
+        system: str,
+        user: str,
+        input_images: list[InputImage] | None = None,
+    ) -> str:
         """OpenAI 互換 API を呼び出してプレーンテキスト応答を得る。"""
         request_payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {
+                    "role": "user",
+                    "content": build_openai_user_content(user, list(input_images or [])),
+                },
             ],
             "temperature": 0,
         }
@@ -293,9 +306,14 @@ class SkillAgent:
                 file=sys.stderr,
             )
 
-    def _json_chat(self, system: str, user: str) -> dict[str, Any]:
+    def _json_chat(
+        self,
+        system: str,
+        user: str,
+        input_images: list[InputImage] | None = None,
+    ) -> dict[str, Any]:
         """モデル応答を JSON オブジェクトとして取得する。"""
-        text = self._plain_chat(system, user).strip()
+        text = self._plain_chat(system, user, input_images=input_images).strip()
         parsed = parse_json_from_text(text)
         if not isinstance(parsed, dict):
             raise SystemExit(f"Model did not return a JSON object:\n{text}")
@@ -340,6 +358,10 @@ class SkillAgent:
                 {"path": path, "content": content}
                 for path, content in state.loaded_workspace_files.items()
             ],
+            "input_images": [
+                image.to_metadata()
+                for image in state.loaded_workspace_images.values()
+            ],
             "session_history": state.session_steps,
             "tool_policy": {
                 "list_directory": (
@@ -349,7 +371,9 @@ class SkillAgent:
                 "read_file": (
                     "Read one file. Use scope=skill for bundled skill files. "
                     "Partial paths and filenames are auto-resolved when they "
-                    "match exactly one file. Use line bounds when needed."
+                    "match exactly one file. Use line bounds when needed. "
+                    "Reading a workspace image adds it to input_images for "
+                    "later model turns."
                 ),
                 "create_file": (
                     "Create one workspace text file. Set skill, filePath, "
@@ -401,12 +425,15 @@ class SkillAgent:
         result: dict[str, Any],
     ) -> None:
         """ツール実行結果を履歴形式へ正規化して追加する。"""
+        serializable_result = {
+            key: value for key, value in result.items() if key != "_input_image"
+        }
         status = (
             "ok"
             if (
-                result.get("returncode") == 0
+                serializable_result.get("returncode") == 0
                 if tool_name == "run_script"
-                else not result.get("error")
+                else not serializable_result.get("error")
             )
             else "error"
         )
@@ -414,7 +441,7 @@ class SkillAgent:
             state,
             turn,
             "tool_result",
-            result,
+            serializable_result,
             tool=tool_name,
             status=status,
         )
@@ -533,6 +560,17 @@ class SkillAgent:
                     result["content"]
                 )
                 state.resource_reads.append(result)
+            elif result.get("contentKind") == "image":
+                image = result.get("_input_image")
+                if isinstance(image, InputImage):
+                    state.loaded_workspace_images[result["path"]] = image
+                state.workspace_reads.append(
+                    {
+                        key: value
+                        for key, value in result.items()
+                        if key != "_input_image"
+                    }
+                )
             else:
                 state.loaded_workspace_files[result["path"]] = result["content"]
                 state.workspace_reads.append(result)
@@ -722,6 +760,7 @@ class SkillAgent:
         list[dict[str, Any]],
         list[dict[str, Any]],
         list[dict[str, Any]],
+        list[dict[str, Any]],
     ]:
         """スキル実行ループを回して最終応答を得る。"""
         state = SkillSessionState(loaded_resources=loaded_resources)
@@ -748,6 +787,7 @@ class SkillAgent:
                     ensure_ascii=False,
                     indent=2,
                 ),
+                input_images=list(state.loaded_workspace_images.values()),
             )
             self._append_session_step(state, turn, "assistant_action", action)
             action_name = str(action.get("action") or "").strip()
@@ -759,6 +799,10 @@ class SkillAgent:
                     state.session_steps,
                     state.workspace_reads,
                     state.workspace_writes,
+                    [
+                        image.to_metadata()
+                        for image in state.loaded_workspace_images.values()
+                    ],
                 )
             handler = handlers.get(action_name)
             if handler is None:
@@ -794,6 +838,10 @@ class SkillAgent:
             "loaded_workspace_files": [
                 {"path": path} for path in state.loaded_workspace_files
             ],
+            "input_images": [
+                image.to_metadata()
+                for image in state.loaded_workspace_images.values()
+            ],
             "session_history": state.session_steps,
             "limit_reached": True,
             "max_skill_turns": self.max_skill_turns,
@@ -801,6 +849,7 @@ class SkillAgent:
         final_text = self._plain_chat(
             SYSTEM_FINALIZER_PROMPT,
             json.dumps(final_payload, ensure_ascii=False, indent=2),
+            input_images=list(state.loaded_workspace_images.values()),
         )
         return (
             final_text,
@@ -809,4 +858,5 @@ class SkillAgent:
             state.session_steps,
             state.workspace_reads,
             state.workspace_writes,
+            [image.to_metadata() for image in state.loaded_workspace_images.values()],
         )

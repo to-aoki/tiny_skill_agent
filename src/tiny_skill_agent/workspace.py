@@ -10,6 +10,7 @@ import subprocess
 import sys
 from typing import Any, Iterable
 
+from .image_inputs import load_input_image
 from .skills import (
     Skill,
     ensure_skill_allows_workspace_path,
@@ -188,7 +189,7 @@ def read_workspace_file(
     end_line: int | None = None,
     allow_search: bool = True,
 ) -> dict[str, Any]:
-    """workspace のテキストファイルを読み込む。"""
+    """workspace のテキストまたは画像ファイルを読み込む。"""
     from .skill_files import read_text_resource
 
     if selected_skill is None:
@@ -205,6 +206,22 @@ def read_workspace_file(
             rel_path,
             allow_search=allow_search,
         )
+    try:
+        input_image = load_input_image(path, display_path=normalized)
+    except SystemExit:
+        input_image = None
+    if input_image is not None:
+        return {
+            "scope": "workspace",
+            "filePath": str(path),
+            "path": normalized,
+            "size_bytes": path.stat().st_size,
+            "resolvedBySearch": resolved_by_search,
+            "contentKind": "image",
+            "mime_type": input_image.mime_type,
+            "content": f"[image file: {normalized}]",
+            "_input_image": input_image,
+        }
     return read_text_resource(
         path,
         normalized,

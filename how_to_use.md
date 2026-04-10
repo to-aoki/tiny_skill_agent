@@ -76,12 +76,16 @@ if __name__ == "__main__":
 - `allow_scripts=True` のときだけ `scripts/` 配下の `.py` を実行できます
 - workspace のルートパスや内容は最初からモデルに送りません
 - 必要なときだけ `list_directory` と `read_file` で取得します
+- workspace の画像も同様で、起動時に自動投入されません
+- workspace 画像は `read_file` で読んだあとにだけ後続ターンの `input_images` としてモデルへ渡されます
 - `openai_telemetry=build_openai_telemetry_emitter(...)` を渡すと OpenTelemetry をローカル JSONL や OTLP endpoint へ出力できます
-- `agent.run(...)` の戻り値は dict で、`final`, `selected_skills`, `script_runs`, `resource_reads`, `workspace_reads`, `workspace_writes`, `session_steps` などを含みます
+- `agent.run(...)` の戻り値は dict で、`final`, `selected_skills`, `script_runs`, `resource_reads`, `workspace_reads`, `workspace_writes`, `session_steps`, `input_images` などを含みます
 
 ## workspace の扱い
 
 workspace を読む・書くアクションは、`SkillAgent(..., workspace=Path(...))` または CLI `--workspace` で渡したルート配下を対象に行います。
+
+画像ファイルも workspace の一部として扱います。比較や視覚確認が必要な skill は、対象画像を `read_file` で読んでから回答します。
 
 ## `allowed-tools` の扱い
 

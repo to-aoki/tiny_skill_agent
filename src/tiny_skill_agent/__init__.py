@@ -26,6 +26,11 @@ from .action import (
     run_skill_script,
 )
 from .cli import cli, main
+from .image_inputs import (
+    InputImage,
+    build_openai_user_content,
+    load_input_image,
+)
 from .prompt import (
     SYSTEM_ACTOR_PROMPT,
     SYSTEM_FINALIZER_PROMPT,

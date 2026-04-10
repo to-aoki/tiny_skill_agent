@@ -1,4 +1,5 @@
 from pathlib import Path
+from base64 import b64decode
 import json
 import shutil
 
@@ -15,7 +16,12 @@ class InMemoryTelemetry:
 
 
 class StubAgent(tiny_skill_agent.SkillAgent):
-    def __init__(self, actions, workspace: Path, allow_scripts: bool = False):
+    def __init__(
+        self,
+        actions,
+        workspace: Path,
+        allow_scripts: bool = False,
+    ):
         self.client = None
         self.model = "stub-model"
         self.registry = None
@@ -26,11 +32,11 @@ class StubAgent(tiny_skill_agent.SkillAgent):
         self.json_users = []
         self.plain_users = []
 
-    def _json_chat(self, system: str, user: str) -> dict:
+    def _json_chat(self, system: str, user: str, input_images=None) -> dict:
         self.json_users.append(user)
         return self._actions.pop(0)
 
-    def _plain_chat(self, system: str, user: str) -> str:
+    def _plain_chat(self, system: str, user: str, input_images=None) -> str:
         self.plain_users.append(user)
         return "finalized"
 
@@ -138,6 +144,44 @@ def test_plain_chat_emits_openai_telemetry(workspace_dir):
     assert payload["response"].model_dump()["id"] == "chatcmpl-test"
     assert payload["attempt"] == 1
     assert payload["selected_skills"] == ["valid-skill", "another-skill"]
+
+
+def test_plain_chat_attaches_input_images_to_openai_request(workspace_dir):
+    image = tiny_skill_agent.InputImage(
+        path="diagram.png",
+        mime_type="image/png",
+        data_url="data:image/png;base64,AAAA",
+        size_bytes=4,
+    )
+    response_payload = {
+        "id": "chatcmpl-image",
+        "object": "chat.completion",
+        "created": 123,
+        "model": "stub-model",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "image answer"},
+                "finish_reason": "stop",
+            }
+        ],
+    }
+    completions = FakeCompletions(response=FakeResponse(response_payload))
+    agent = tiny_skill_agent.SkillAgent(
+        client=FakeClient(completions),
+        model="stub-model",
+        registry=None,
+        workspace=workspace_dir,
+    )
+
+    text = agent._plain_chat("system prompt", "user prompt", input_images=[image])
+
+    assert text == "image answer"
+    user_content = completions.calls[0]["messages"][1]["content"]
+    assert isinstance(user_content, list)
+    assert user_content[0] == {"type": "text", "text": "user prompt"}
+    assert user_content[1]["type"] == "image_url"
+    assert user_content[1]["image_url"]["url"] == "data:image/png;base64,AAAA"
 
 
 def test_plain_chat_emits_openai_error_telemetry(workspace_dir):
@@ -275,7 +319,7 @@ def test_run_skill_session_reads_resource_then_respond(valid_skill, workspace_di
     ], workspace=workspace_dir)
     loaded_resources = build_loaded_resources(valid_skill)
 
-    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes = agent._run_skill_session(
+    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes, input_images = agent._run_skill_session(
         "summarize",
         [valid_skill],
         loaded_resources,
@@ -285,6 +329,7 @@ def test_run_skill_session_reads_resource_then_respond(valid_skill, workspace_di
     assert script_runs == []
     assert workspace_reads == []
     assert workspace_writes == []
+    assert input_images == []
     assert resource_reads[0]["path"] == "references/guide.md"
     assert resource_reads[0]["resolvedBySearch"] is True
     assert "Formatting guidance for tests." in loaded_resources["valid-skill"]["references/guide.md"]
@@ -314,7 +359,7 @@ def test_run_skill_session_reads_workspace_file_then_respond(valid_skill, worksp
     ], workspace=workspace_dir)
     loaded_resources = build_loaded_resources(valid_skill)
 
-    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes = agent._run_skill_session(
+    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes, input_images = agent._run_skill_session(
         "summarize",
         [valid_skill],
         loaded_resources,
@@ -324,8 +369,56 @@ def test_run_skill_session_reads_workspace_file_then_respond(valid_skill, worksp
     assert resource_reads == []
     assert script_runs == []
     assert workspace_writes == []
+    assert input_images == []
     assert workspace_reads[0]["path"] == "app.py"
     assert "print('hi')" in workspace_reads[0]["content"]
+    assert any(step["tool"] == "read_file" for step in session_steps if step["type"] == "tool_result")
+
+
+def test_run_skill_session_reads_workspace_image_then_respond(valid_skill, workspace_dir):
+    (workspace_dir / "images").mkdir()
+    (workspace_dir / "images" / "frame.png").write_bytes(
+        b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+nXcQAAAAASUVORK5CYII="
+        )
+    )
+    agent = StubAgent([
+        {
+            "action": "read_file",
+            "skill": "valid-skill",
+            "scope": "workspace",
+            "filePath": "images/frame.png",
+            "args": [],
+            "message": "",
+            "reason": "Need the image for comparison.",
+        },
+        {
+            "action": "respond",
+            "message": "done",
+            "reason": "Finished.",
+        },
+    ], workspace=workspace_dir)
+    loaded_resources = build_loaded_resources(valid_skill)
+
+    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes, input_images = agent._run_skill_session(
+        "compare",
+        [valid_skill],
+        loaded_resources,
+    )
+
+    assert final_text == "done"
+    assert resource_reads == []
+    assert script_runs == []
+    assert workspace_writes == []
+    assert workspace_reads[0]["contentKind"] == "image"
+    assert workspace_reads[0]["path"] == "images/frame.png"
+    assert input_images == [
+        {
+            "path": "images/frame.png",
+            "mime_type": "image/png",
+            "size_bytes": workspace_reads[0]["size_bytes"],
+        }
+    ]
     assert any(step["tool"] == "read_file" for step in session_steps if step["type"] == "tool_result")
 
 
@@ -355,7 +448,7 @@ def test_run_skill_session_lists_directory_then_respond(valid_skill, workspace_d
     ], workspace=workspace_dir)
     loaded_resources = build_loaded_resources(valid_skill)
 
-    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes = agent._run_skill_session(
+    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes, input_images = agent._run_skill_session(
         "summarize",
         [valid_skill],
         loaded_resources,
@@ -366,6 +459,7 @@ def test_run_skill_session_lists_directory_then_respond(valid_skill, workspace_d
     assert script_runs == []
     assert workspace_reads == []
     assert workspace_writes == []
+    assert input_images == []
     listing_step = next(step for step in session_steps if step["type"] == "tool_result" and step["tool"] == "list_directory")
     assert "src/main.py" in listing_step["data"]["entries"]
 
@@ -392,7 +486,7 @@ def test_run_skill_session_writes_workspace_file_then_respond(valid_skill, works
     ], workspace=workspace_dir)
     loaded_resources = build_loaded_resources(valid_skill)
 
-    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes = agent._run_skill_session(
+    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes, input_images = agent._run_skill_session(
         "summarize",
         [valid_skill],
         loaded_resources,
@@ -402,6 +496,7 @@ def test_run_skill_session_writes_workspace_file_then_respond(valid_skill, works
     assert resource_reads == []
     assert script_runs == []
     assert workspace_reads == []
+    assert input_images == []
     assert workspace_writes[0]["path"] == "notes/todo.txt"
     assert tiny_skill_agent.read_utf8_text_file(workspace_dir / "notes" / "todo.txt") == "line 1\nline 2\n"
     assert any(step["tool"] == "create_file" for step in session_steps if step["type"] == "tool_result")
@@ -430,7 +525,7 @@ def test_run_skill_session_ignores_allowed_tools_for_workspace_write(valid_skill
     ], workspace=workspace_dir)
     loaded_resources = build_loaded_resources(valid_skill)
 
-    final_text, resource_reads, script_runs, _, workspace_reads, workspace_writes = agent._run_skill_session(
+    final_text, resource_reads, script_runs, _, workspace_reads, workspace_writes, input_images = agent._run_skill_session(
         "summarize",
         [valid_skill],
         loaded_resources,
@@ -440,6 +535,7 @@ def test_run_skill_session_ignores_allowed_tools_for_workspace_write(valid_skill
     assert resource_reads == []
     assert script_runs == []
     assert workspace_reads == []
+    assert input_images == []
     assert workspace_writes[0]["path"] == "blocked.txt"
     assert workspace_writes[0]["created"] is True
     assert (workspace_dir / "blocked.txt").read_text(encoding="utf-8") == "blocked\n"
@@ -466,7 +562,7 @@ def test_run_skill_session_runs_script_then_respond(valid_skill, workspace_dir):
     ], workspace=workspace_dir, allow_scripts=True)
     loaded_resources = build_loaded_resources(valid_skill)
 
-    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes = agent._run_skill_session(
+    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes, input_images = agent._run_skill_session(
         "summarize",
         [valid_skill],
         loaded_resources,
@@ -476,6 +572,7 @@ def test_run_skill_session_runs_script_then_respond(valid_skill, workspace_dir):
     assert resource_reads == []
     assert workspace_reads == []
     assert workspace_writes == []
+    assert input_images == []
     assert script_runs[0]["returncode"] == 0
     assert '"label": "agent-test"' in script_runs[0]["stdout"]
     assert any(step["tool"] == "run_script" for step in session_steps if step["type"] == "tool_result")
@@ -506,7 +603,7 @@ def test_run_skill_session_infers_single_available_script(valid_skill, workspace
     ], workspace=workspace_dir, allow_scripts=True)
     loaded_resources = build_loaded_resources(single_script_skill)
 
-    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes = agent._run_skill_session(
+    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes, input_images = agent._run_skill_session(
         "summarize",
         [single_script_skill],
         loaded_resources,
@@ -516,6 +613,7 @@ def test_run_skill_session_infers_single_available_script(valid_skill, workspace
     assert resource_reads == []
     assert workspace_reads == []
     assert workspace_writes == []
+    assert input_images == []
     assert script_runs[0]["returncode"] == 0
     assert script_runs[0]["path"] == "scripts/echo_workspace.py"
     assert '"label": "implicit-script"' in script_runs[0]["stdout"]
@@ -542,7 +640,7 @@ def test_run_skill_session_extracts_script_path_from_args(valid_skill, workspace
     ], workspace=workspace_dir, allow_scripts=True)
     loaded_resources = build_loaded_resources(valid_skill)
 
-    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes = agent._run_skill_session(
+    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes, input_images = agent._run_skill_session(
         "summarize",
         [valid_skill],
         loaded_resources,
@@ -552,6 +650,7 @@ def test_run_skill_session_extracts_script_path_from_args(valid_skill, workspace
     assert resource_reads == []
     assert workspace_reads == []
     assert workspace_writes == []
+    assert input_images == []
     assert script_runs[0]["returncode"] == 0
     assert script_runs[0]["path"] == "scripts/echo_workspace.py"
     assert '"label": "path-in-args"' in script_runs[0]["stdout"]
@@ -579,7 +678,7 @@ def test_run_skill_session_rejects_non_python_script_request(valid_skill, worksp
     ], workspace=workspace_dir, allow_scripts=True)
     loaded_resources = build_loaded_resources(valid_skill)
 
-    final_text, resource_reads, script_runs, _, workspace_reads, workspace_writes = agent._run_skill_session(
+    final_text, resource_reads, script_runs, _, workspace_reads, workspace_writes, input_images = agent._run_skill_session(
         "summarize",
         [valid_skill],
         loaded_resources,
@@ -589,6 +688,7 @@ def test_run_skill_session_rejects_non_python_script_request(valid_skill, worksp
     assert resource_reads == []
     assert workspace_reads == []
     assert workspace_writes == []
+    assert input_images == []
     assert script_runs[0]["returncode"] is None
     assert "Only Python scripts under scripts/" in script_runs[0]["error"]
 
@@ -603,7 +703,7 @@ def test_run_skill_session_initial_payload_omits_workspace_root(valid_skill, wor
     ], workspace=workspace_dir)
     loaded_resources = build_loaded_resources(valid_skill)
 
-    final_text, _, _, _, _, _ = agent._run_skill_session(
+    final_text, _, _, _, _, _, input_images = agent._run_skill_session(
         "summarize",
         [valid_skill],
         loaded_resources,
@@ -619,6 +719,7 @@ def test_run_skill_session_initial_payload_omits_workspace_root(valid_skill, wor
     assert "available_scripts" not in payload["skills"][0]
     assert "find_file" not in payload["tool_policy"]
     assert "find_file" not in payload["skills"][0]["allowed_actions"]
+    assert input_images == []
 
 
 def test_run_skill_session_records_unknown_action_dispatch(valid_skill, workspace_dir):
@@ -637,7 +738,7 @@ def test_run_skill_session_records_unknown_action_dispatch(valid_skill, workspac
     ], workspace=workspace_dir)
     loaded_resources = build_loaded_resources(valid_skill)
 
-    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes = agent._run_skill_session(
+    final_text, resource_reads, script_runs, session_steps, workspace_reads, workspace_writes, input_images = agent._run_skill_session(
         "summarize",
         [valid_skill],
         loaded_resources,
@@ -650,5 +751,6 @@ def test_run_skill_session_records_unknown_action_dispatch(valid_skill, workspac
     assert script_runs == []
     assert workspace_reads == []
     assert workspace_writes == []
+    assert input_images == []
     assert dispatch_step["status"] == "error"
     assert "Unknown action: unsupported_action" in dispatch_step["data"]["error"]

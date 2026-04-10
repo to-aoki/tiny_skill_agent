@@ -73,6 +73,10 @@ uv run tiny-skill-agent --skills ./skills --validate-skills
 
 workspace を読む・書くアクションは、CLI の `--workspace` または `SkillAgent(..., workspace=...)` で渡したルート配下を対象に行います。
 
+workspace 内に画像ファイルがある場合も同様です。画像は起動時に自動投入されず、skill が `read_file` で対象画像を読んだときだけ後続のモデル入力へ追加されます。
+
+たとえば画像比較系 skill では、まず workspace から 2 枚の画像を `read_file` で読み、その後に `input_images` として比較に使います。
+
 ## `allowed-tools`
 
 `allowed-tools` は読み取りますが、現実装では権限制御には使っていません。実際の制御に使うのは次だけです。
@@ -140,4 +144,4 @@ if __name__ == "__main__":
 
 - OpenAI 互換 API は `chat.completions` を使います
 - `agent.run(...)` の戻り値は dict です
-- 主なキーは `final`, `selected_skills`, `resource_reads`, `workspace_reads`, `workspace_writes`, `script_runs`, `session_steps` です
+- 主なキーは `final`, `selected_skills`, `resource_reads`, `workspace_reads`, `workspace_writes`, `script_runs`, `session_steps`, `input_images` です
